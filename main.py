@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from gotrue.errors import AuthApiError
@@ -59,6 +59,41 @@ def login(body: Credentials):
             "refresh_token": result.session.refresh_token,
             "user": jsonable_encoder(result.user),
         },
+    )
+
+
+@app.get("/public/info")
+def public_info():
+    """No auth required — sanity-check route for Stage 2."""
+    return JSONResponse(
+        status_code=200,
+        content={
+            "service": "FlyRank Auth API",
+            "message": "This is a public endpoint, no auth required.",
+        },
+    )
+
+
+@app.get("/protected/profile")
+def protected_profile(request: Request):
+    """Stub for Stage 2: only checks that a well-formed Bearer header is
+    present. Stage 3 replaces this with real Supabase token verification."""
+    auth_header = request.headers.get("Authorization")
+
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=401, content={"error": "Missing or malformed Authorization header"}
+        )
+
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        return JSONResponse(
+            status_code=401, content={"error": "Missing or malformed Authorization header"}
+        )
+
+    return JSONResponse(
+        status_code=200,
+        content={"message": "Token present — verification comes in Stage 3", "token_preview": token[:10] + "..."},
     )
 
 
