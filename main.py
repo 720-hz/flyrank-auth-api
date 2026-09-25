@@ -76,8 +76,9 @@ def public_info():
 
 @app.get("/protected/profile")
 def protected_profile(request: Request):
-    """Stub for Stage 2: only checks that a well-formed Bearer header is
-    present. Stage 3 replaces this with real Supabase token verification."""
+    """Stage 3: the Bearer token is now verified for real against Supabase
+    via supabase.auth.get_user(). Stage 4 will extract this check into a
+    reusable dependency shared by every protected route."""
     auth_header = request.headers.get("Authorization")
 
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -91,10 +92,15 @@ def protected_profile(request: Request):
             status_code=401, content={"error": "Missing or malformed Authorization header"}
         )
 
-    return JSONResponse(
-        status_code=200,
-        content={"message": "Token present — verification comes in Stage 3", "token_preview": token[:10] + "..."},
-    )
+    try:
+        result = supabase.auth.get_user(token)
+    except AuthApiError:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired token"})
+
+    if not result or not result.user:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired token"})
+
+    return JSONResponse(status_code=200, content={"user": jsonable_encoder(result.user)})
 
 
 if __name__ == "__main__":
