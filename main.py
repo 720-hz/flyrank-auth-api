@@ -10,7 +10,18 @@ from pydantic import BaseModel
 from auth import bearer_scheme, get_current_user
 from config import supabase, PORT
 
-app = FastAPI(title="FlyRank Auth API", version="0.1.0")
+app = FastAPI(
+    title="FlyRank Auth API",
+    version="0.1.0",
+    description=(
+        "Auth backend using Supabase as the identity provider.\n\n"
+        "Public routes (`/public/info`, `/auth/signup`, `/auth/login`) need "
+        "no token. For protected routes, log in via `POST /auth/login` to "
+        "get an `access_token`, click **Authorize** above, paste the token "
+        "(no `Bearer ` prefix needed), and try any protected endpoint "
+        "directly from this page."
+    ),
+)
 
 
 @app.exception_handler(HTTPException)
