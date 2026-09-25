@@ -1,7 +1,9 @@
+import os
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from gotrue.errors import AuthApiError
@@ -9,6 +11,7 @@ from pydantic import BaseModel
 
 from auth import bearer_scheme, get_current_user
 from config import supabase, PORT
+from schemas import Category, TriageRequest, TriageResponse, Urgency
 
 app = FastAPI(
     title="FlyRank Auth API",
@@ -29,6 +32,22 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     """Keeps every error response in the same {"error": ...} shape, whether
     it came from a manual check or a Depends()-raised HTTPException."""
     return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """W7 Stage 1: /triage relies on Pydantic (TriageRequest) to validate the
+    body instead of the hand-rolled Optional-fields trick the auth routes
+    use, so FastAPI raises this instead of our own HTTPException. Rewritten
+    to the same 400-with-a-named-field shape everything else in this API
+    uses, and it fires before any model call is made."""
+    errors = exc.errors()
+    if errors:
+        field = ".".join(str(p) for p in errors[0]["loc"] if p != "body")
+        message = f"{field}: {errors[0]['msg']}" if field else errors[0]["msg"]
+    else:
+        message = "Invalid request body"
+    return JSONResponse(status_code=400, content={"error": message})
 
 
 class Credentials(BaseModel):
@@ -133,6 +152,30 @@ def protected_dashboard(user=Depends(get_current_user)):
             "user": jsonable_encoder(user),
         },
     )
+
+
+@app.post("/triage", response_model=TriageResponse)
+def triage(body: TriageRequest):
+    """W7 Stage 1: the contract exists before the model does. Input is
+    validated by TriageRequest above (400 before this function even runs,
+    via the RequestValidationError handler), and the response is typed as
+    TriageResponse so nothing can leave this route that doesn't match the
+    schema in schemas.py.
+
+    With LLM_STUB=1 this returns a canned, schema-valid answer and never
+    touches the network at all -- lets the endpoint, its validation, and
+    its response shape be built and tested for free, before there's any
+    model wired up behind it.
+    """
+    if os.environ.get("LLM_STUB") == "1":
+        return TriageResponse(
+            category=Category.other,
+            urgency=Urgency.low,
+            confidence=0.42,
+            reason="Stub response — LLM_STUB=1, no model was called.",
+        )
+
+    raise HTTPException(status_code=503, detail="AI triage is not wired up yet")
 
 
 if __name__ == "__main__":
