@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from auth import bearer_scheme, get_current_user
 from config import supabase, PORT
+from llm import call_model
 from schemas import Category, TriageRequest, TriageResponse, Urgency
 
 app = FastAPI(
@@ -166,6 +167,11 @@ def triage(body: TriageRequest):
     touches the network at all -- lets the endpoint, its validation, and
     its response shape be built and tested for free, before there's any
     model wired up behind it.
+
+    W7 Stage 2: with a real key configured, the request goes to the model
+    with the prompt in prompts/triage-v1.md, and the raw answer is parsed
+    as JSON straight into TriageResponse -- happy-path only for now, no
+    repair or quarantine yet (that's Stage 3).
     """
     if os.environ.get("LLM_STUB") == "1":
         return TriageResponse(
@@ -175,7 +181,8 @@ def triage(body: TriageRequest):
             reason="Stub response — LLM_STUB=1, no model was called.",
         )
 
-    raise HTTPException(status_code=503, detail="AI triage is not wired up yet")
+    raw = call_model(body.text)
+    return TriageResponse.model_validate_json(raw)
 
 
 if __name__ == "__main__":
