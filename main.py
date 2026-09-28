@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from auth import bearer_scheme, get_current_user
 from config import supabase, PORT
-from llm import call_model
+from llm import TriageFailedError, call_with_repair
 from schemas import Category, TriageRequest, TriageResponse, Urgency
 
 app = FastAPI(
@@ -169,9 +169,12 @@ def triage(body: TriageRequest):
     model wired up behind it.
 
     W7 Stage 2: with a real key configured, the request goes to the model
-    with the prompt in prompts/triage-v1.md, and the raw answer is parsed
-    as JSON straight into TriageResponse -- happy-path only for now, no
-    repair or quarantine yet (that's Stage 3).
+    with the prompt in prompts/triage-v1.md.
+
+    W7 Stage 3: the real path goes through call_with_repair, which parses
+    the model's answer, validates it against TriageResponse, repairs once
+    on failure, and quarantines + raises on a second failure. Raw model
+    text is never returned to the caller, on success or failure.
     """
     if os.environ.get("LLM_STUB") == "1":
         return TriageResponse(
@@ -181,8 +184,10 @@ def triage(body: TriageRequest):
             reason="Stub response — LLM_STUB=1, no model was called.",
         )
 
-    raw = call_model(body.text)
-    return TriageResponse.model_validate_json(raw)
+    try:
+        return call_with_repair(body.text)
+    except TriageFailedError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 if __name__ == "__main__":
