@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+import openai
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -159,22 +160,24 @@ def protected_dashboard(user=Depends(get_current_user)):
 def triage(body: TriageRequest):
     """W7 Stage 1: the contract exists before the model does. Input is
     validated by TriageRequest above (400 before this function even runs,
-    via the RequestValidationError handler), and the response is typed as
-    TriageResponse so nothing can leave this route that doesn't match the
-    schema in schemas.py.
-
-    With LLM_STUB=1 this returns a canned, schema-valid answer and never
-    touches the network at all -- lets the endpoint, its validation, and
-    its response shape be built and tested for free, before there's any
-    model wired up behind it.
-
-    W7 Stage 2: with a real key configured, the request goes to the model
-    with the prompt in prompts/triage-v1.md.
+    via the RequestValidationError handler). With LLM_STUB=1 this returns
+    a canned, schema-valid answer and never touches the network -- lets
+    the endpoint be built and tested for free.
 
     W7 Stage 3: the real path goes through call_with_repair, which parses
     the model's answer, validates it against TriageResponse, repairs once
     on failure, and quarantines + raises on a second failure. Raw model
     text is never returned to the caller, on success or failure.
+
+    W7 Stage 4: LLM_ENABLED=false is the kill switch — every production AI
+    feature needs one for the day the provider has an outage, or someone
+    just needs to be able to turn it off without a deploy. It returns a
+    safe, deterministic fallback and never imports/calls the model at
+    all. Model errors below map to the closest honest status: a timeout
+    that survived retries is 504 (something we depend on took too long);
+    every other unrecoverable provider error is 502 (the upstream server
+    gave us a bad answer, not a bad question) — as opposed to 422, which
+    is reserved for "the model answered, but not in the shape we need."
     """
     if os.environ.get("LLM_STUB") == "1":
         return TriageResponse(
@@ -184,10 +187,22 @@ def triage(body: TriageRequest):
             reason="Stub response — LLM_STUB=1, no model was called.",
         )
 
+    if os.environ.get("LLM_ENABLED", "true").lower() == "false":
+        return TriageResponse(
+            category=Category.other,
+            urgency=Urgency.normal,
+            confidence=0.0,
+            reason="AI triage is temporarily disabled; routed to the general queue for manual review.",
+        )
+
     try:
         return call_with_repair(body.text)
     except TriageFailedError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except openai.APITimeoutError:
+        raise HTTPException(status_code=504, detail="the model did not respond in time")
+    except openai.OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"model provider error: {e}")
 
 
 if __name__ == "__main__":
