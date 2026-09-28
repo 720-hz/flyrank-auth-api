@@ -214,6 +214,12 @@ text is never returned to the caller, on success or failure.
   {"event": "llm_call", "timestamp": "2026-09-25T19:05:00Z", "prompt_version": "triage-v1", "model": "openrouter/free", "duration_ms": 812, "repaired": false, "retries": 0, "ok": true, "input_tokens": 310, "output_tokens": 42}
   ```
 
+  On `openrouter/free` that call costs **$0** — it's a free-tier model, which is the whole point of
+  running it there. To make the number meaningful, scale the same 310/42 token call against a
+  typical low-cost paid model instead (e.g. ~$0.15 / 1M input tokens, ~$0.60 / 1M output tokens):
+  10,000 requests/day → ~3.1M input + ~0.42M output tokens/day → **~$0.72/day (~$22/month)** at
+  that pricing. Swapping `LLM_MODEL` is the only change needed to see the real number for whatever
+  provider you actually deploy against.
 - **Kill switch:** `LLM_ENABLED=false` skips the model entirely and returns a safe, deterministic
   fallback — for the day the provider has an outage, or someone just needs this off without a
   deploy.
